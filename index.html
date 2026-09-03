@@ -24,7 +24,7 @@
 *{box-sizing:border-box}
 html,body{margin:0}
 body{
-  background:#e2d5bd; color:var(--ink);
+  background:var(--paper); color:var(--ink);
   font-family:'Rubik',system-ui,sans-serif;
   -webkit-font-smoothing:antialiased;
   display:flex; justify-content:center; min-height:100dvh;
@@ -33,11 +33,6 @@ body{
   width:100%; max-width:430px; background:var(--paper);
   display:flex; flex-direction:column; min-height:100dvh;
   padding-bottom:calc(28px + env(safe-area-inset-bottom));
-}
-@media (min-width:520px){
-  body{align-items:center; padding:28px 0}
-  .screen{min-height:0; height:min(900px,calc(100dvh - 56px)); border-radius:26px; overflow-y:auto;
-    box-shadow:0 18px 40px rgba(80,60,30,.22); border:1px solid #cbbb9d}
 }
 header{padding:20px 20px 16px}
 .rule{display:flex; gap:4px; margin-bottom:12px}
@@ -80,6 +75,11 @@ h1{font-size:34px; font-weight:800; line-height:.95; letter-spacing:-.03em; marg
 .go:hover{background:var(--chore); border-color:var(--chore)}
 .go:disabled{background:var(--pill); border-color:var(--pill); color:#8a7c62; cursor:not-allowed}
 .hint{text-align:center; font-size:12px; color:var(--muted); margin-top:10px; min-height:16px}
+.add-tag-row{margin:-6px 0 16px}
+.add-tag-panel{display:none; margin-top:10px}
+.add-tag-panel.open{display:block}
+.add-tag-panel .input{margin-bottom:10px}
+.add-tag-panel .go{padding:12px}
 .manual-toggle-row{text-align:center; margin-top:4px}
 .manual-panel{margin-top:16px; padding-top:16px; border-top:1px dashed var(--hair); display:none}
 .manual-panel.open{display:block}
@@ -109,7 +109,9 @@ h1{font-size:34px; font-weight:800; line-height:.95; letter-spacing:-.03em; marg
 /* log */
 .log-date-heading{font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin:16px 0 6px}
 .log-date-heading:first-child{margin-top:0}
-.row{display:flex; gap:10px; align-items:baseline; padding:11px 0; border-bottom:1px solid var(--rule); font-size:14px}
+.log-hint{font-size:11px; font-weight:400; text-transform:none; letter-spacing:0; color:var(--faint)}
+.row{display:flex; gap:10px; align-items:baseline; padding:11px 2px; border-bottom:1px solid var(--rule); font-size:14px; cursor:pointer; border-radius:10px}
+.row:hover{background:rgba(43,36,29,.04)}
 .row:last-child{border-bottom:none}
 .row .dot{width:8px; height:8px; border-radius:50%; background:var(--tag-color); flex-shrink:0; align-self:center}
 .row .t{color:var(--faint); width:58px; font-size:11px; font-weight:500; flex-shrink:0}
@@ -117,6 +119,12 @@ h1{font-size:34px; font-weight:800; line-height:.95; letter-spacing:-.03em; marg
 .row .n.untitled{color:var(--muted); font-style:italic; font-weight:400}
 .row .d{font-weight:700; flex-shrink:0}
 .empty-state{text-align:center; color:var(--muted); font-size:13px; padding:14px 0}
+.log-edit-panel{margin:2px 0 12px; padding:14px; border:1px solid var(--hair); border-radius:16px; background:#fdf7ea}
+.log-edit-panel .input{margin-bottom:10px}
+.log-edit-panel .tags{margin-bottom:14px}
+.log-edit-actions{display:flex; align-items:center; gap:16px; margin-top:2px}
+.log-edit-actions .go{flex:1; padding:12px}
+.danger-link{color:var(--danger)}
 .storage-note{text-align:center; font-size:11px; color:var(--muted); margin:0 20px 16px}
 </style>
 </head>
@@ -139,6 +147,16 @@ h1{font-size:34px; font-weight:800; line-height:.95; letter-spacing:-.03em; marg
   <section class="panel">
     <input type="text" class="input" id="taskInput" placeholder="what are you doing?" maxlength="120">
     <div class="tags" id="tagRow"></div>
+
+    <div class="add-tag-row">
+      <button type="button" class="link-btn" id="addTagToggle">+ Add a tag</button>
+      <div class="add-tag-panel" id="addTagPanel">
+        <input type="text" class="input" id="newTagName" placeholder="new tag name" maxlength="24">
+        <button type="button" class="go" id="addTagSaveBtn">Add tag</button>
+        <div class="manual-error" id="addTagError"></div>
+      </div>
+    </div>
+
     <button class="go" id="goBtn">Start</button>
     <div class="hint" id="hint"></div>
 
@@ -180,7 +198,7 @@ h1{font-size:34px; font-weight:800; line-height:.95; letter-spacing:-.03em; marg
   </section>
 
   <section class="panel">
-    <div class="tally-hd"><h2>Log</h2></div>
+    <div class="tally-hd"><h2>Log <span class="log-hint">&middot; tap an entry to edit</span></h2></div>
     <div id="logList"></div>
   </section>
 
@@ -196,16 +214,21 @@ h1{font-size:34px; font-weight:800; line-height:.95; letter-spacing:-.03em; marg
     { id: 'social', label: 'Social', short: 'SOC', color: 'var(--social)' },
   ];
   const TAG_MAP = Object.fromEntries(TAGS.map(t => [t.id, t]));
+  const TAG_PALETTE = ['#c97b3d','#3d7a99','#6b8f4e','#9c6bb0','#b0555a','#5a8a7a','#a68a3d','#6a6ab0'];
   const ENTRIES_KEY = 'hldit-entries';
   const ACTIVE_KEY = 'hldit-active';
+  const TAGS_KEY = 'hldit-custom-tags';
 
   let entries = [];       // {id, task, tag, startISO, endISO, durationMs}
   let activeTimers = [];  // [{id, task, tag, startISO}, ...] — multiple can run at once
+  let customTags = [];    // user-added tags, persisted separately from the 5 defaults
   let selectedTag = null; // for the next timer you're about to start
   let tickHandle = null;
   let currentRange = 'today';
   let storageOK = true;
   let openEditId = null;  // id of the running timer whose start-time editor is open
+  let openLogEditId = null; // id of the log entry currently being edited
+  let logEditTag = null;    // selected tag while editing a log entry
 
   const el = {
     runningPanel: document.getElementById('runningPanel'),
@@ -213,6 +236,11 @@ h1{font-size:34px; font-weight:800; line-height:.95; letter-spacing:-.03em; marg
     tagRow: document.getElementById('tagRow'),
     goBtn: document.getElementById('goBtn'),
     hint: document.getElementById('hint'),
+    addTagToggle: document.getElementById('addTagToggle'),
+    addTagPanel: document.getElementById('addTagPanel'),
+    newTagName: document.getElementById('newTagName'),
+    addTagSaveBtn: document.getElementById('addTagSaveBtn'),
+    addTagError: document.getElementById('addTagError'),
     tallyChart: document.getElementById('tallyChart'),
     tallyBaseline: document.getElementById('tallyBaseline'),
     tallyTotal: document.getElementById('tallyTotal'),
@@ -282,6 +310,35 @@ h1{font-size:34px; font-weight:800; line-height:.95; letter-spacing:-.03em; marg
         activeTimers = [];
       }
     }catch(err){ activeTimers = []; }
+    try{
+      const c = await storageGet(TAGS_KEY);
+      const parsed = c ? JSON.parse(c.value) : [];
+      if(Array.isArray(parsed)){
+        customTags = parsed;
+        customTags.forEach(t => {
+          if(!TAG_MAP[t.id]){ TAGS.push(t); TAG_MAP[t.id] = t; }
+        });
+      }
+    }catch(err){ customTags = []; }
+  }
+
+  async function saveCustomTags(){
+    await storageSet(TAGS_KEY, JSON.stringify(customTags));
+  }
+
+  function addTag(label){
+    const trimmed = (label || '').trim();
+    if(!trimmed) return null;
+    const tag = {
+      id: 'tag' + Date.now().toString(36) + Math.random().toString(36).slice(2,5),
+      label: trimmed,
+      short: trimmed.slice(0,3).toUpperCase(),
+      color: TAG_PALETTE[customTags.length % TAG_PALETTE.length],
+    };
+    TAGS.push(tag);
+    TAG_MAP[tag.id] = tag;
+    customTags.push(tag);
+    return tag;
   }
 
   async function saveEntries(){
@@ -555,6 +612,7 @@ h1{font-size:34px; font-weight:800; line-height:.95; letter-spacing:-.03em; marg
         const tag = TAG_MAP[e.tag] || TAGS[0];
         const row = document.createElement('div');
         row.className = 'row';
+        row.dataset.id = e.id;
         const taskText = e.task && e.task.trim() ? escapeHtml(e.task.trim()) : 'Untitled';
         const taskClass = e.task && e.task.trim() ? 'n' : 'n untitled';
         row.innerHTML = `
@@ -564,8 +622,91 @@ h1{font-size:34px; font-weight:800; line-height:.95; letter-spacing:-.03em; marg
           <span class="d">${fmtHuman(e.durationMs)}</span>
         `;
         el.logList.appendChild(row);
+
+        if(openLogEditId === e.id){
+          const panel = document.createElement('div');
+          panel.className = 'log-edit-panel';
+          panel.dataset.id = e.id;
+          panel.innerHTML = `
+            <input type="text" class="input" data-role="logEditTask" data-id="${e.id}" placeholder="what did you do?" value="${escapeHtml(e.task || '')}">
+            <div class="tags" data-role="logEditTags" data-id="${e.id}"></div>
+            <div class="time-field-row">
+              <div class="time-field">
+                <label>Start</label>
+                <input type="datetime-local" data-role="logEditStart" data-id="${e.id}" value="${toLocalInputValue(e.startISO)}">
+              </div>
+              <div class="time-field">
+                <label>End</label>
+                <input type="datetime-local" data-role="logEditEnd" data-id="${e.id}" value="${toLocalInputValue(e.endISO)}">
+              </div>
+            </div>
+            <div class="log-edit-actions">
+              <button type="button" class="go" data-action="saveLogEdit" data-id="${e.id}">Save</button>
+              <button type="button" class="link-btn danger-link" data-action="deleteLogEntry" data-id="${e.id}">Delete</button>
+            </div>
+            <div class="manual-error" data-role="logEditError" data-id="${e.id}"></div>
+          `;
+          el.logList.appendChild(panel);
+          renderLogEditTags(e.id);
+        }
       });
     });
+  }
+
+  function renderLogEditTags(entryId){
+    const container = el.logList.querySelector(`[data-role="logEditTags"][data-id="${entryId}"]`);
+    if(!container) return;
+    renderTagPills(container, logEditTag, false, (id) => {
+      logEditTag = id;
+      renderLogEditTags(entryId);
+    });
+  }
+
+  async function saveLogEdit(id){
+    const entry = entries.find(e => e.id === id);
+    if(!entry) return;
+    const errorEl = el.logList.querySelector(`[data-role="logEditError"][data-id="${id}"]`);
+    if(errorEl) errorEl.textContent = '';
+    if(!logEditTag){
+      if(errorEl) errorEl.textContent = 'Pick a tag.';
+      return;
+    }
+    const taskInput = el.logList.querySelector(`input[data-role="logEditTask"][data-id="${id}"]`);
+    const startInput = el.logList.querySelector(`input[data-role="logEditStart"][data-id="${id}"]`);
+    const endInput = el.logList.querySelector(`input[data-role="logEditEnd"][data-id="${id}"]`);
+    // datetime-local only has minute precision, so an untouched field can round-trip
+    // to a value that collides with its neighbor on short (sub-minute) entries.
+    // Only re-parse a field if it was actually changed — otherwise keep the exact
+    // original timestamp so editing the task/tag alone can't break the duration.
+    const startISO = startInput.value === toLocalInputValue(entry.startISO) ? entry.startISO : fromLocalInputValue(startInput.value);
+    const endISO = endInput.value === toLocalInputValue(entry.endISO) ? entry.endISO : fromLocalInputValue(endInput.value);
+    if(!startISO || !endISO){
+      if(errorEl) errorEl.textContent = 'Add a start and end time.';
+      return;
+    }
+    const durationMs = new Date(endISO).getTime() - new Date(startISO).getTime();
+    if(durationMs <= 0){
+      if(errorEl) errorEl.textContent = 'End time has to be after the start time.';
+      return;
+    }
+    entry.task = taskInput.value || '';
+    entry.tag = logEditTag;
+    entry.startISO = startISO;
+    entry.endISO = endISO;
+    entry.durationMs = durationMs;
+    await saveEntries();
+    openLogEditId = null;
+    renderAll();
+  }
+
+  async function deleteLogEntry(id){
+    if(!confirm('Delete this entry?')) return;
+    const idx = entries.findIndex(e => e.id === id);
+    if(idx === -1) return;
+    entries.splice(idx, 1);
+    await saveEntries();
+    openLogEditId = null;
+    renderAll();
   }
 
   function renderAll(){
@@ -617,6 +758,41 @@ h1{font-size:34px; font-weight:800; line-height:.95; letter-spacing:-.03em; marg
 
   el.goBtn.addEventListener('click', handleGo);
 
+  // ---- add a custom tag ----
+  el.addTagToggle.addEventListener('click', () => {
+    const isOpen = el.addTagPanel.classList.contains('open');
+    if(isOpen){
+      el.addTagPanel.classList.remove('open');
+    }else{
+      el.newTagName.value = '';
+      el.addTagError.textContent = '';
+      el.addTagPanel.classList.add('open');
+      el.newTagName.focus();
+    }
+  });
+
+  async function handleAddTag(){
+    const name = el.newTagName.value;
+    if(!name || !name.trim()){
+      el.addTagError.textContent = 'Give it a name.';
+      return;
+    }
+    const dup = TAGS.some(t => t.label.toLowerCase() === name.trim().toLowerCase());
+    if(dup){
+      el.addTagError.textContent = 'That tag already exists.';
+      return;
+    }
+    addTag(name);
+    await saveCustomTags();
+    el.addTagPanel.classList.remove('open');
+    renderAll();
+  }
+
+  el.addTagSaveBtn.addEventListener('click', handleAddTag);
+  el.newTagName.addEventListener('keydown', (ev) => {
+    if(ev.key === 'Enter') handleAddTag();
+  });
+
   el.runningPanel.addEventListener('click', async (ev) => {
     const btn = ev.target.closest('button[data-action]');
     if(!btn) return;
@@ -646,6 +822,28 @@ h1{font-size:34px; font-weight:800; line-height:.95; letter-spacing:-.03em; marg
       }
       openEditId = null;
       renderRunningPanel();
+    }
+  });
+
+  el.logList.addEventListener('click', async (ev) => {
+    const actionBtn = ev.target.closest('button[data-action]');
+    if(actionBtn){
+      const { action, id } = actionBtn.dataset;
+      if(action === 'saveLogEdit') await saveLogEdit(id);
+      else if(action === 'deleteLogEntry') await deleteLogEntry(id);
+      return;
+    }
+    const row = ev.target.closest('.row[data-id]');
+    if(row){
+      const id = row.dataset.id;
+      if(openLogEditId === id){
+        openLogEditId = null;
+      }else{
+        openLogEditId = id;
+        const entry = entries.find(e => e.id === id);
+        logEditTag = entry ? entry.tag : null;
+      }
+      renderLog();
     }
   });
 
